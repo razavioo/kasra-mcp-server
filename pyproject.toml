@@ -1,0 +1,30 @@
+[build-system]
+requires = ["setuptools>=61.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "kasra-mcp-server"
+version = "1.0.3"
+description = "Model Context Protocol (MCP) server for Kasra Lite Attendance and Personnel Management System"
+readme = "README.md"
+authors = [{ name = "Emad Razavi", email = "razavioo@gmail.com" }]
+license = "MIT"
+keywords = ["mcp", "model-context-protocol", "kasra", "attendance", "fastmcp"]
+requires-python = ">=3.10"
+dependencies = [
+    "fastmcp>=2.0.0",
+    "httpx>=0.25.0",
+    "beautifulsoup4>=4.12.0",
+    "pycryptodome>=3.18.0",
+    "python-dotenv>=1.0.0"
+]
+
+[project.scripts]
+kasra-mcp-server = "main:main"
+
+[project.urls]
+Homepage = "https://github.com/razavioo/kasra-mcp-server"
+Repository = "https://github.com/razavioo/kasra-mcp-server"
+
+[tool.setuptools]
+py-modules = ["main", "server", "kasra_client"]
