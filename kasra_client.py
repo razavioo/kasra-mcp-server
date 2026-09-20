@@ -773,7 +773,7 @@ class KasraHTTPClient:
             return []
 
     async def get_desktop_favorites(self) -> List[Dict[str, Any]]:
-        """دریافت لیست میانبرهای میز کار کاربر (Desktop favorites/bookmarks)."""
+        """دریافت لیست میان‌برهای میز کار کاربر (Desktop favorites/bookmarks)."""
         await self.ensure_logged_in()
         r = await self._client.get(f"{self.base_url}/Lego.Web/Widget/DesktopWidget/DesktopWidgetRender/")
         match = re.search(r'DesktopWidgetPartialNameSpace\.favMenuJsonList\s*=\s*(\[.*?\]);', r.text, re.DOTALL)
