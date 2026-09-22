@@ -356,7 +356,7 @@ class KasraHTTPClient:
                 "row": row_idx,
                 "date": rec_date,
                 "day": row_dict.get("روز", ""),
-                "punches": row_dict.get("تردد‌ها", ""),
+                "punches": row_dict.get("ترددها", ""),
                 "totalPresence": row_dict.get("حضور", ""),
                 "shiftPresence": row_dict.get("ح.شيفت", ""),
                 "surplusPresence": row_dict.get("مازاد حضور", ""),
