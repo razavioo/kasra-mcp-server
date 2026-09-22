@@ -379,6 +379,104 @@ class KasraHTTPClient:
             "totals": totals,
         }
 
+    async def get_punch_gaps(
+        self,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+        shift_start: str = "08:00",
+        shift_end: str = "17:00",
+    ) -> Dict[str, Any]:
+        """
+        Analyze daily punches to find gaps (periods the employee was out during their shift).
+        Returns structured gap data suitable for submitting hourly leave requests.
+
+        Punch convention: times alternate entry/exit. Odd-indexed (1st, 3rd, ...) = entry, even-indexed (2nd, 4th, ...) = exit.
+        A "gap" is the period between an exit and the next entry, if it falls within the shift window.
+
+        Args:
+            start_date: Persian start date YYYY/MM/DD (optional filter).
+            end_date: Persian end date YYYY/MM/DD (optional filter).
+            shift_start: Shift start time HH:mm (default "08:00") for bounding gaps.
+            shift_end: Shift end time HH:mm (default "17:00") for bounding gaps.
+        """
+        report = await self.get_daily_report(start_date=start_date, end_date=end_date)
+        records = report.get("records", [])
+
+        all_gaps = []
+        for rec in records:
+            punches_raw = rec.get("punches", "").strip()
+            if not punches_raw:
+                continue
+
+            # Parse punch times: split by common separators (space, dash, comma, -)
+            times_str = re.split(r'[\s\-,\u200c]+', punches_raw)
+            times = []
+            for t in times_str:
+                t = t.strip()
+                if re.match(r'^\d{1,2}:\d{2}$', t):
+                    times.append(t)
+
+            if len(times) < 4:
+                # Need at least 2 pairs (entry-exit-entry-exit) to have a gap
+                continue
+
+            # Build entry/exit pairs and find gaps between them
+            date = rec.get("date", "")
+            day = rec.get("day", "")
+            deficit = rec.get("deficitPresence", "")
+
+            pairs = []
+            for i in range(0, len(times) - 1, 2):
+                entry = times[i]
+                exit_t = times[i + 1] if i + 1 < len(times) else None
+                if exit_t:
+                    pairs.append({"entry": entry, "exit": exit_t})
+
+            # Gaps are between consecutive pairs: pair[n].exit -> pair[n+1].entry
+            for i in range(len(pairs) - 1):
+                gap_start = pairs[i]["exit"]
+                gap_end = pairs[i + 1]["entry"]
+
+                # Clamp gap to shift window
+                if gap_start < shift_start:
+                    gap_start = shift_start
+                if gap_end > shift_end:
+                    gap_end = shift_end
+
+                # Validate: gap must be positive and within shift
+                if gap_start >= gap_end:
+                    continue
+                if gap_start >= shift_end or gap_end <= shift_start:
+                    continue
+
+                # Calculate duration in minutes
+                gs_h, gs_m = map(int, gap_start.split(":"))
+                ge_h, ge_m = map(int, gap_end.split(":"))
+                duration_min = (ge_h * 60 + ge_m) - (gs_h * 60 + gs_m)
+
+                if duration_min <= 0:
+                    continue
+
+                all_gaps.append({
+                    "date": date,
+                    "day": day,
+                    "gapStart": gap_start,
+                    "gapEnd": gap_end,
+                    "durationMinutes": duration_min,
+                    "durationFormatted": f"{duration_min // 60}:{duration_min % 60:02d}",
+                    "deficitPresence": deficit,
+                    "punches": punches_raw,
+                })
+
+        total_minutes = sum(g["durationMinutes"] for g in all_gaps)
+        return {
+            "count": len(all_gaps),
+            "totalMinutes": total_minutes,
+            "totalFormatted": f"{total_minutes // 60}:{total_minutes % 60:02d}",
+            "gaps": all_gaps,
+            "shiftWindow": {"start": shift_start, "end": shift_end},
+        }
+
     async def get_work_periods(self) -> List[Dict[str, str]]:
         """Get all available attendance work periods (دوره‌های کارکرد)."""
         await self.ensure_logged_in()
@@ -611,6 +709,30 @@ class KasraHTTPClient:
         except Exception:
             return []
 
+    async def _get_inductee_members(self, page_id: str) -> List[Dict[str, Any]]:
+        """
+        Load default InducteeComponent members from the Lego framework.
+        Returns the member list with correct field names expected by ModifyEnterCredit.
+        """
+        try:
+            payload = json.dumps({"pageId": int(page_id)})
+            req_headers = await self._get_request_header(payload)
+            req_headers["Content-Type"] = "application/json; charset=UTF-8"
+            res = await self._client.post(
+                f"{self.base_url}/Lego.Web/Frm/InducteeComponent/GetInducteeMembers",
+                headers=req_headers,
+                content=payload,
+            )
+            if res.status_code == 200:
+                data = res.json()
+                # Response contains InducteeItemsTb array
+                items = data if isinstance(data, list) else data.get("InducteeItemsTb", data.get("d", []))
+                if isinstance(items, list) and items:
+                    return items
+        except Exception:
+            pass
+        return []
+
     async def submit_credit_request(
         self,
         credit_type_id: int,
@@ -647,6 +769,17 @@ class KasraHTTPClient:
             if iid.startswith("keyTokenValue_"):
                 key_token_val = inp.get("value", "")
 
+        # Extract PageID dynamically from the page
+        page_id = "13158"
+        page_id_match = re.search(r'EnterCreditNameSpace\.PageID\s*=\s*[\'"]?(\d+)[\'"]?\s*;', ec_page.text)
+        if page_id_match:
+            page_id = page_id_match.group(1)
+        else:
+            # Fallback: look for pageId in hidden inputs or other JS variables
+            page_id_input = soup.find("input", {"id": re.compile(r"pageId|PageID", re.IGNORECASE)})
+            if page_id_input:
+                page_id = page_id_input.get("value", page_id)
+
         if is_daily is None:
             type_val = 1 if (start_time and end_time) else 2
         else:
@@ -677,22 +810,37 @@ class KasraHTTPClient:
         display_name = display_name_match.group(1) if display_name_match else f"{self.username}-"
 
         credit_info = json.dumps({"CreditInfo": [json_item]})
-        members = json.dumps([{
-            "ID": 0,
-            "InducteeID": 0,
-            "MemberTypeID": 8134,
-            "MemberTypeTitle": "پرسنل",
-            "MemberID": person_id,
-            "MemberName": display_name,
-            "Description": "",
-        }])
+
+        # Load members from InducteeComponent endpoint (correct Kasra JS structure)
+        inductee_members = await self._get_inductee_members(page_id)
+        if inductee_members:
+            members = json.dumps(inductee_members)
+        else:
+            # Fallback: construct member with correct field names matching JS structure
+            members = json.dumps([{
+                "ID": 0,
+                "InducteeID": 0,
+                "MemberTypeID": 8134,
+                "MemberTypeTitle": "پرسنل",
+                "MemberID": person_id,
+                "MemberTitle": display_name,
+                "IsNotIncluded": False,
+                "OperationType": "Add",
+                "Description": "",
+            }])
 
         save_data = {
             "CreditInfo": credit_info,
             "Members": members,
-            "PageID": "13158",
+            "PageID": page_id,
             "CorrectedMainDocId": 0,
         }
+
+        # Serialize the body for GetHeader nonce/checksum generation
+        body_str = json.dumps(save_data)
+
+        # Get nonce + chkRequestData via GetHeader (required by Kasra's $.ajaxSetup beforeSend)
+        req_headers = await self._get_request_header(body_str)
 
         headers = {
             "Content-Type": "application/json; charset=UTF-8",
@@ -700,12 +848,14 @@ class KasraHTTPClient:
             "Referer": f"{self.base_url}/Lego.Web/TA/EnterCredit/EnterCredit",
             "antiCsrfTokenValue": anti_csrf_val,
             "keyTokenValue": key_token_val,
+            "nonce": req_headers.get("nonce", ""),
+            "chkRequestData": req_headers.get("chkRequestData", ""),
         }
 
         res = await self._client.post(
             f"{self.base_url}/Lego.Web/TA/EnterCredit/ModifyEnterCredit/",
             headers=headers,
-            content=json.dumps(save_data),
+            content=body_str,
         )
 
         try:

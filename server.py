@@ -75,6 +75,37 @@ async def kasra_get_daily_report(
 
 
 @mcp.tool()
+async def kasra_get_punch_gaps(
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
+    shift_start: str = "08:00",
+    shift_end: str = "17:00",
+    reason: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    تحلیل ترددها و شناسایی بازههایی که کارمند در ساعات کاری بیرون بوده (خلأ بین خروج و ورود بعدی در شیفت).
+    مناسب برای شناسایی ساعاتی که نیاز به ثبت مرخصی ساعتی دارند.
+
+    Analyze daily punches to find gaps where the employee was out during their shift.
+    Returns structured gap data (date, gapStart, gapEnd, duration) suitable for submitting hourly leave.
+
+    Args:
+        start_date: تاریخ شروع شمسی اختیاری (مثال: '1405/04/01')
+        end_date: تاریخ پایان شمسی اختیاری (مثال: '1405/04/31')
+        shift_start: ساعت شروع شیفت (پیشفرض: '08:00')
+        shift_end: ساعت پایان شیفت (پیشفرض: '17:00')
+        reason: دلیل اختیاری
+    """
+    client = _get_client()
+    return await client.get_punch_gaps(
+        start_date=start_date,
+        end_date=end_date,
+        shift_start=shift_start,
+        shift_end=shift_end,
+    )
+
+
+@mcp.tool()
 async def kasra_get_work_periods(reason: Optional[str] = None) -> List[Dict[str, str]]:
     """
     دریافت لیست تمام دوره‌های کاری مالی و تردد موجود در سامانه (مانند شهریور 1405، مرداد 1405، ...).
