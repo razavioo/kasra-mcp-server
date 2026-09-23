@@ -9,7 +9,7 @@ import os
 import re
 import subprocess
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 from bs4 import BeautifulSoup
 from Crypto.Cipher import AES
 from Crypto.Util.Padding import pad
@@ -21,6 +21,92 @@ load_dotenv()
 DEFAULT_BASE_URL = os.getenv("KASRA_BASE_URL", "https://app.kasralite.com")
 DEFAULT_USERNAME = os.getenv("KASRA_USERNAME", "")
 DEFAULT_PASSWORD = os.getenv("KASRA_PASSWORD", "")
+
+_PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹", "0123456789")
+_ARABIC_DIGITS = str.maketrans("٠١٢٣٤٥٦٧٨٩", "0123456789")
+_JALALI_MONTH_NAMES = {
+    "فروردین": 1,
+    "اردیبهشت": 2,
+    "خرداد": 3,
+    "تیر": 4,
+    "مرداد": 5,
+    "شهریور": 6,
+    "مهر": 7,
+    "آبان": 8,
+    "آذر": 9,
+    "دی": 10,
+    "بهمن": 11,
+    "اسفند": 12,
+}
+
+
+def _normalize_digits(value: str) -> str:
+    return value.translate(_PERSIAN_DIGITS).translate(_ARABIC_DIGITS)
+
+
+def _normalize_jalali_date(value: Optional[str]) -> Optional[str]:
+    """Normalize and validate a Kasra Jalali date (YYYY/MM/DD)."""
+    if value is None or not str(value).strip():
+        return None
+    normalized = _normalize_digits(str(value).strip()).replace("-", "/")
+    parts = normalized.split("/")
+    if len(parts) != 3 or not all(part.isdigit() for part in parts):
+        raise ValueError(f"Invalid Jalali date {value!r}; expected YYYY/MM/DD")
+    year, month, day = (int(part) for part in parts)
+    if month <= 6:
+        max_day = 31
+    elif month <= 11:
+        max_day = 30
+    else:
+        max_day = int(_jalali_month_bounds(year, month)[1][-2:])
+    if year < 1 or not 1 <= month <= 12 or not 1 <= day <= max_day:
+        raise ValueError(f"Invalid Jalali date {value!r}; expected YYYY/MM/DD")
+    return f"{year:04d}/{month:02d}/{day:02d}"
+
+
+def _date_key(value: str) -> Tuple[int, int, int]:
+    normalized = _normalize_jalali_date(value)
+    assert normalized is not None
+    year, month, day = normalized.split("/")
+    return int(year), int(month), int(day)
+
+
+def _month_sequence(start: Tuple[int, int], end: Tuple[int, int]) -> List[Tuple[int, int]]:
+    """Return every Jalali year/month in an inclusive range."""
+    year, month = start
+    result: List[Tuple[int, int]] = []
+    while (year, month) <= end:
+        result.append((year, month))
+        month += 1
+        if month == 13:
+            year += 1
+            month = 1
+    return result
+
+
+def _jalali_month_bounds(year: int, month: int) -> Tuple[str, str]:
+    """Return valid bounds for one Jalali month."""
+    if month <= 6:
+        last_day = 31
+    elif month <= 11:
+        last_day = 30
+    else:
+        # Birashk's 2820-year cycle is also used by the common Jalali
+        # conversion algorithms and avoids sending an invalid Esfand date.
+        epbase = year - (474 if year >= 0 else 473)
+        epyear = 474 + (epbase % 2820)
+        last_day = 30 if ((epyear + 38) * 682) % 2816 < 682 else 29
+    return f"{year:04d}/{month:02d}/01", f"{year:04d}/{month:02d}/{last_day:02d}"
+
+
+def _period_month(title: str) -> Optional[Tuple[int, int]]:
+    """Extract (year, month) from a Kasra period title such as «شهريور 1405»."""
+    tokens = _normalize_digits(title.strip()).replace("ي", "ی").replace("ك", "ک").split()
+    year = next((int(token) for token in tokens if token.isdigit() and len(token) == 4), None)
+    if year is None:
+        return None
+    month = _JALALI_MONTH_NAMES.get(next((token for token in tokens if token in _JALALI_MONTH_NAMES), ""))
+    return (year, month) if month is not None else None
 
 
 def _detect_physical_local_ip() -> Optional[str]:
@@ -310,13 +396,18 @@ class KasraHTTPClient:
     # -------------------------------------------------------------
     # 2. Attendance Reports
     # -------------------------------------------------------------
-    async def get_daily_report(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
-        """
-        Get daily attendance records (کارکرد روزانه) with punches, hours, deficit, surplus, leave, missions, and shift.
-        """
-        await self.ensure_logged_in()
-        res = await self._client.get(f"{self.base_url}/TAPresentation/App_Pages/Reports/MainDailyReport")
-        soup = BeautifulSoup(res.text, "html.parser")
+    @staticmethod
+    def _input_value(soup: BeautifulSoup, element_id: str, default: str = "") -> str:
+        element = soup.find(id=element_id)
+        return str(element.get("value", default)).strip() if element else default
+
+    @staticmethod
+    def _parse_daily_page(
+        html: str,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        soup = BeautifulSoup(html, "html.parser")
         table = soup.find("table", {"id": "ctl00_ContentPlaceHolder1_GrdDailyReport"})
         if not table:
             return {"count": 0, "records": [], "totals": None}
@@ -326,19 +417,17 @@ class KasraHTTPClient:
             return {"count": 0, "records": [], "totals": None}
 
         headers = [th.get_text(strip=True) for th in rows[0].find_all(["th", "td"])]
-        records = []
+        records: List[Dict[str, Any]] = []
         totals = None
+        start_key = _date_key(start_date) if start_date else None
+        end_key = _date_key(end_date) if end_date else None
 
-        for r in rows[1:]:
-            cells = [td.get_text(strip=True).replace("\xa0", " ") for td in r.find_all(["td", "th"])]
+        for row in rows[1:]:
+            cells = [td.get_text(strip=True).replace("\xa0", " ") for td in row.find_all(["td", "th"])]
             if len(cells) <= 1:
                 continue
 
-            row_dict = {}
-            for idx, h in enumerate(headers):
-                if idx < len(cells):
-                    row_dict[h] = cells[idx]
-
+            row_dict = {header: cells[idx] for idx, header in enumerate(headers) if idx < len(cells)}
             row_idx = row_dict.get("رديف", "")
             if row_idx == "جمع" or "جمع" in row_dict.get("تاريخ", "") or "جمع" in str(row_idx):
                 totals = row_dict
@@ -347,14 +436,18 @@ class KasraHTTPClient:
             rec_date = row_dict.get("تاريخ", "").strip()
             if not rec_date:
                 continue
-            if start_date and rec_date < start_date:
+            try:
+                rec_key = _date_key(rec_date)
+            except ValueError:
                 continue
-            if end_date and rec_date > end_date:
+            if start_key and rec_key < start_key:
+                continue
+            if end_key and rec_key > end_key:
                 continue
 
             records.append({
                 "row": row_idx,
-                "date": rec_date,
+                "date": _normalize_jalali_date(rec_date),
                 "day": row_dict.get("روز", ""),
                 "punches": row_dict.get("ترددها", ""),
                 "totalPresence": row_dict.get("حضور", ""),
@@ -373,10 +466,126 @@ class KasraHTTPClient:
                 "structure": row_dict.get("ساختار", ""),
             })
 
+        return {"count": len(records), "records": records, "totals": totals}
+
+    async def _get_daily_period_page(
+        self,
+        period_id: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> Tuple[Dict[str, Any], Dict[str, str]]:
+        """Load daily report through Kasra's period-aware report URL."""
+        await self.ensure_logged_in()
+        base_url = f"{self.base_url}/TAPresentation/App_Pages/Reports/MainDailyReport"
+        initial = await self._client.get(base_url)
+        initial_soup = BeautifulSoup(initial.text, "html.parser")
+        metadata = {
+            "personcode": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtPCode"),
+            "personid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtpersonid"),
+            "sessionid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtSessionID"),
+            "topersonid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtOnLineUser"),
+            "onlineuser": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtOnLineUser"),
+            "parentmenuitemid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtPageID", "1302"),
+            "personname": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtName"),
+            "current_period_id": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtWorkPeriodID"),
+            "current_start_date": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_SDate"),
+            "current_end_date": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_EDate"),
+        }
+        target_period = str(period_id or metadata["current_period_id"])
+        target_start = _normalize_jalali_date(start_date) or _normalize_jalali_date(metadata["current_start_date"])
+        target_end = _normalize_jalali_date(end_date) or _normalize_jalali_date(metadata["current_end_date"])
+        params = {
+            "personcode": metadata["personcode"],
+            "personid": metadata["personid"],
+            "sdate": target_start or "",
+            "edate": target_end or "",
+            "requsterpageid": "1306",
+            "requsteraction": "personcode",
+            "sessionid": metadata["sessionid"],
+            "topersonid": metadata["topersonid"],
+            "onlineuser": metadata["onlineuser"],
+            "wpid": target_period,
+            "personname": metadata["personname"],
+            "ParentMenuItemId": metadata["parentmenuitemid"],
+        }
+        response = await self._client.get(base_url, params=params)
+        if response.status_code != 200:
+            raise RuntimeError(f"Failed to load daily report for period {target_period}: HTTP {response.status_code}")
+        return self._parse_daily_page(response.text, target_start, target_end), {
+            "id": target_period,
+            "startDate": target_start or "",
+            "endDate": target_end or "",
+        }
+
+    async def get_daily_report(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
+        """Get daily attendance for the requested date range, including old work periods."""
+        normalized_start = _normalize_jalali_date(start_date)
+        normalized_end = _normalize_jalali_date(end_date)
+        if normalized_start and normalized_end and _date_key(normalized_start) > _date_key(normalized_end):
+            raise ValueError("start_date must not be after end_date")
+
+        # Preserve the existing no-argument behaviour: the current work period is the default.
+        if not normalized_start and not normalized_end:
+            report, period = await self._get_daily_period_page()
+            report["periods"] = [period]
+            report["requestedRange"] = {"startDate": None, "endDate": None}
+            return report
+
+        periods = await self.get_work_periods()
+        parsed_periods = [(period, _period_month(period.get("title", ""))) for period in periods]
+        known = {month: period for period, month in parsed_periods if month is not None}
+        available_months = sorted(known)
+        if not available_months:
+            return {
+                "count": 0,
+                "records": [],
+                "totals": None,
+                "periods": [],
+                "missingPeriods": [],
+                "requestedRange": {"startDate": normalized_start, "endDate": normalized_end},
+            }
+
+        first_month = (available_months[0] if not normalized_start else _date_key(normalized_start)[:2])
+        last_month = (available_months[-1] if not normalized_end else _date_key(normalized_end)[:2])
+        requested_months = _month_sequence(first_month, last_month)
+
+        records: List[Dict[str, Any]] = []
+        totals_by_period: List[Dict[str, Any]] = []
+        loaded_periods: List[Dict[str, str]] = []
+        missing_periods: List[str] = []
+        for year_month in requested_months:
+            period = known.get(year_month)
+            if period is None:
+                missing_periods.append(f"{year_month[0]:04d}/{year_month[1]:02d}")
+                continue
+            period_start, period_end = _jalali_month_bounds(*year_month)
+            if normalized_start and _date_key(normalized_start) > _date_key(period_start):
+                period_start = normalized_start
+            if normalized_end and _date_key(normalized_end) < _date_key(period_end):
+                period_end = normalized_end
+            report, period_info = await self._get_daily_period_page(
+                period_id=period.get("id"), start_date=period_start, end_date=period_end
+            )
+            records.extend(report.get("records", []))
+            if report.get("totals") is not None:
+                totals_by_period.append({"period": period_info, "totals": report["totals"]})
+            period_info["title"] = period.get("title", "")
+            loaded_periods.append(period_info)
+
+        records.sort(key=lambda record: _date_key(record["date"]))
+        totals: Any = None
+        if len(totals_by_period) == 1:
+            totals = totals_by_period[0]["totals"]
+        elif totals_by_period:
+            totals = [entry["totals"] for entry in totals_by_period]
         return {
             "count": len(records),
             "records": records,
             "totals": totals,
+            "totalsByPeriod": totals_by_period,
+            "periods": loaded_periods,
+            "missingPeriods": missing_periods,
+            "requestedRange": {"startDate": normalized_start, "endDate": normalized_end},
         }
 
     async def get_punch_gaps(
@@ -487,9 +696,13 @@ class KasraHTTPClient:
             return []
         periods = []
         for opt in select.find_all("option"):
+            title = opt.get_text(strip=True)
+            month = _period_month(title)
             periods.append({
                 "id": opt.get("value", "").strip(),
-                "title": opt.get_text(strip=True),
+                "title": title,
+                "year": str(month[0]) if month else "",
+                "month": str(month[1]) if month else "",
             })
         return periods
 
@@ -501,15 +714,26 @@ class KasraHTTPClient:
         m_page = await self._client.get(f"{self.base_url}/TAPresentation/App_Pages/Reports/MainMonthlyReport")
         soup = BeautifulSoup(m_page.text, "html.parser")
 
-        anti_csrf = soup.find("input", {"id": "ctl00_antiCsrfToken"}).get("value", "")
-        key_token = soup.find("input", {"id": "ctl00_keyToken"}).get("value", "")
-        session_id = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_txtSessionID"}).get("value", "")
-        online_user = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_txtOnLineUser"}).get("value", "")
-        company_id = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_txtCompanyID"}).get("value", "")
-        person_code = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_CmbPerson_txtCode"}).get("value", "")
-        person_name = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_CmbPerson_txtName"}).get("value", "")
+        anti_csrf = self._input_value(soup, "ctl00_antiCsrfToken")
+        key_token = self._input_value(soup, "ctl00_keyToken")
+        session_id = self._input_value(soup, "ctl00_ContentPlaceHolder1_txtSessionID")
+        online_user = self._input_value(soup, "ctl00_ContentPlaceHolder1_txtOnLineUser")
+        company_id = self._input_value(soup, "ctl00_ContentPlaceHolder1_txtCompanyID")
+        person_code = self._input_value(soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtCode")
+        person_name = self._input_value(soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtName")
 
-        wpid = period_id or "55"
+        select = soup.find("select", {"id": "ctl00_ContentPlaceHolder1_CmbPeriod"})
+        selected = select.find("option", selected=True) if select else None
+        if selected is None and select:
+            selected = select.find("option")
+        wpid = str(period_id).strip() if period_id is not None and str(period_id).strip() else (
+            selected.get("value", "").strip() if selected else self._input_value(soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtSWPID")
+        )
+        period_title = selected.get_text(strip=True) if selected else ""
+        if period_id and select:
+            requested = select.find("option", value=str(period_id).strip())
+            if requested:
+                period_title = requested.get_text(strip=True)
 
         ajax_payload = {
             "ReportID": "1",
@@ -547,7 +771,7 @@ class KasraHTTPClient:
         )
 
         if res.status_code != 200:
-            return {"period": wpid, "data": None, "totals": None, "error": res.text}
+            return {"period": wpid, "periodTitle": period_title, "data": None, "totals": None, "error": res.text}
 
         data_d = res.json().get("d", "")
         # The response format is <Root>...</Root>[ {json} ]
@@ -559,13 +783,14 @@ class KasraHTTPClient:
                 totals_row = rows[1] if len(rows) > 1 else None
                 return {
                     "period": wpid,
+                    "periodTitle": period_title,
                     "data": data_row,
                     "totals": totals_row,
                 }
             except Exception:
                 pass
 
-        return {"period": wpid, "raw": data_d}
+        return {"period": wpid, "periodTitle": period_title, "raw": data_d}
 
     # -------------------------------------------------------------
     # 3. Cartable
@@ -968,8 +1193,8 @@ class KasraHTTPClient:
 
     async def export_daily_report_excel(
         self,
-        start_date: str = "1405/06/01",
-        end_date: str = "1405/06/31",
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
     ) -> Dict[str, Any]:
         """
         ایجاد و دریافت آدرس دانلود فایل اکسل کارکرد روزانه (Generate & download daily attendance Excel).
@@ -978,12 +1203,22 @@ class KasraHTTPClient:
         daily_page = await self._client.get(f"{self.base_url}/TAPresentation/App_Pages/Reports/MainDailyReport")
         soup = BeautifulSoup(daily_page.text, "html.parser")
 
-        anti_csrf = soup.find("input", {"id": "ctl00_antiCsrfToken"}).get("value", "")
-        key_token = soup.find("input", {"id": "ctl00_keyToken"}).get("value", "")
-        session_id = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_txtSessionID"}).get("value", "")
-        company_id = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_txtCompanyID"}).get("value", "99")
-        online_user = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_txtOnLineUser"}).get("value", "")
-        person_code = soup.find("input", {"id": "ctl00_ContentPlaceHolder1_CmbPerson_txtPCode"}).get("value", self.username)
+        anti_csrf = self._input_value(soup, "ctl00_antiCsrfToken")
+        key_token = self._input_value(soup, "ctl00_keyToken")
+        session_id = self._input_value(soup, "ctl00_ContentPlaceHolder1_txtSessionID")
+        company_id = self._input_value(soup, "ctl00_ContentPlaceHolder1_txtCompanyID", "99")
+        online_user = self._input_value(soup, "ctl00_ContentPlaceHolder1_txtOnLineUser")
+        person_code = self._input_value(soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtPCode", self.username)
+        start_date = _normalize_jalali_date(start_date) or _normalize_jalali_date(
+            self._input_value(soup, "ctl00_ContentPlaceHolder1_SDate")
+        )
+        end_date = _normalize_jalali_date(end_date) or _normalize_jalali_date(
+            self._input_value(soup, "ctl00_ContentPlaceHolder1_EDate")
+        )
+        if not start_date or not end_date:
+            raise RuntimeError("Kasra did not provide a valid daily report date range")
+        if _date_key(start_date) > _date_key(end_date):
+            raise ValueError("start_date must not be after end_date")
 
         excel_payload = {
             "PersonCode": person_code,
@@ -1049,4 +1284,3 @@ class KasraHTTPClient:
 
 
 KasraClient = KasraHTTPClient
-

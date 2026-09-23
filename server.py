@@ -55,6 +55,8 @@ async def kasra_get_daily_report(
 ) -> Dict[str, Any]:
     """
     دریافت گزارش تفصیلی کارکرد روزانه تردد (حضور، غیبت، تردد‌ها و مرخصی‌ها).
+    بازه‌های مربوط به ماه جاری، ماه قبل و ماه‌های قدیمی از دوره‌های واقعی سامانه خوانده می‌شوند؛
+    بازه‌ای که چند ماه را پوشش دهد، رکوردهای همه دوره‌ها را به ترتیب تاریخ برمی‌گرداند.
     برای هر روز شامل:
     - تاریخ و روز هفته
     - کلیه تردد‌های ثبت‌شده (ثبت ساعت‌های ورود و خروج)
@@ -301,8 +303,8 @@ async def kasra_get_personnel_groups(reason: Optional[str] = None) -> Dict[str, 
 
 @mcp.tool()
 async def kasra_export_daily_report_excel(
-    start_date: str = "1405/06/01",
-    end_date: str = "1405/06/31",
+    start_date: Optional[str] = None,
+    end_date: Optional[str] = None,
     reason: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
@@ -310,8 +312,8 @@ async def kasra_export_daily_report_excel(
     Export daily attendance report to an Excel spreadsheet file (.xls) with direct download link.
 
     Args:
-        start_date: تاریخ شروع شمسی (مثال: '1405/06/01')
-        end_date: تاریخ پایان شمسی (مثال: '1405/06/31')
+        start_date: تاریخ شروع شمسی اختیاری (مثال: '1405/06/01'). در صورت خالی بودن، شروع دوره جاری سامانه استفاده می‌شود.
+        end_date: تاریخ پایان شمسی اختیاری (مثال: '1405/06/31'). در صورت خالی بودن، پایان دوره جاری سامانه استفاده می‌شود.
         reason: دلیل اختیاری
     """
     client = _get_client()
