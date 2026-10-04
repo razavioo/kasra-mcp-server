@@ -477,44 +477,49 @@ class KasraHTTPClient:
         """Load daily report through Kasra's period-aware report URL."""
         await self.ensure_logged_in()
         base_url = f"{self.base_url}/TAPresentation/App_Pages/Reports/MainDailyReport"
-        initial = await self._client.get(base_url)
-        initial_soup = BeautifulSoup(initial.text, "html.parser")
-        metadata = {
-            "personcode": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtPCode"),
-            "personid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtpersonid"),
-            "sessionid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtSessionID"),
-            "topersonid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtOnLineUser"),
-            "onlineuser": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtOnLineUser"),
-            "parentmenuitemid": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtPageID", "1302"),
-            "personname": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_CmbPerson_txtName"),
-            "current_period_id": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_txtWorkPeriodID"),
-            "current_start_date": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_SDate"),
-            "current_end_date": self._input_value(initial_soup, "ctl00_ContentPlaceHolder1_EDate"),
-        }
-        target_period = str(period_id or metadata["current_period_id"])
-        target_start = _normalize_jalali_date(start_date) or _normalize_jalali_date(metadata["current_start_date"])
-        target_end = _normalize_jalali_date(end_date) or _normalize_jalali_date(metadata["current_end_date"])
-        params = {
-            "personcode": metadata["personcode"],
-            "personid": metadata["personid"],
-            "sdate": target_start or "",
-            "edate": target_end or "",
-            "requsterpageid": "1306",
-            "requsteraction": "personcode",
-            "sessionid": metadata["sessionid"],
-            "topersonid": metadata["topersonid"],
-            "onlineuser": metadata["onlineuser"],
-            "wpid": target_period,
-            "personname": metadata["personname"],
-            "ParentMenuItemId": metadata["parentmenuitemid"],
-        }
-        response = await self._client.get(base_url, params=params)
+
+        target_start = _normalize_jalali_date(start_date)
+        target_end = _normalize_jalali_date(end_date)
+        target_period = str(period_id) if period_id is not None else None
+
+        params: Dict[str, str] = {}
+        if target_start and target_end:
+            params["sdate"] = target_start
+            params["edate"] = target_end
+        elif target_start:
+            params["sdate"] = target_start
+            params["edate"] = target_start
+        elif target_end:
+            params["sdate"] = target_end
+            params["edate"] = target_end
+
+        if target_period is not None:
+            params["wpid"] = target_period
+
+        # Only pass query parameters when needed (sdate, edate, or wpid).
+        # Passing extra parameters (e.g. personcode, personid, requsterpageid, etc.)
+        # corrupts ASP.NET WebForms session context and breaks the personnel filter.
+        response = await self._client.get(base_url, params=params if params else None)
         if response.status_code != 200:
-            raise RuntimeError(f"Failed to load daily report for period {target_period}: HTTP {response.status_code}")
+            raise RuntimeError(
+                f"Failed to load daily report"
+                + (f" for period {target_period}" if target_period else "")
+                + f": HTTP {response.status_code}"
+            )
+
+        soup = BeautifulSoup(response.text, "html.parser")
+        current_period_id = self._input_value(soup, "ctl00_ContentPlaceHolder1_txtWorkPeriodID")
+        current_start_date = self._input_value(soup, "ctl00_ContentPlaceHolder1_SDate")
+        current_end_date = self._input_value(soup, "ctl00_ContentPlaceHolder1_EDate")
+
+        resolved_period = target_period or current_period_id
+        resolved_start = target_start or _normalize_jalali_date(current_start_date) or ""
+        resolved_end = target_end or _normalize_jalali_date(current_end_date) or ""
+
         return self._parse_daily_page(response.text, target_start, target_end), {
-            "id": target_period,
-            "startDate": target_start or "",
-            "endDate": target_end or "",
+            "id": resolved_period,
+            "startDate": resolved_start,
+            "endDate": resolved_end,
         }
 
     async def get_daily_report(self, start_date: Optional[str] = None, end_date: Optional[str] = None) -> Dict[str, Any]:
