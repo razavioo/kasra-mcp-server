@@ -8,6 +8,7 @@ from typing import Any, Dict, List, Optional
 from fastmcp import FastMCP
 from kasra_client import KasraClient
 from contextlib import asynccontextmanager
+import os
 from runtime import AccountMiddleware, accounts, current_account
 from manager_tools import READ, WRITE, register_manager_tools
 from personal_tools import register_personal_tools
@@ -32,6 +33,8 @@ register_personal_tools(mcp)
 
 
 def _get_client() -> KasraClient:
+    if os.getenv("KASRA_MCP_MODE") != "http":
+        return KasraClient.get_instance()
     return current_account().client
 
 

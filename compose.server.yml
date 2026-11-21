@@ -1,7 +1,7 @@
 services:
   kasra-mcp:
     build: .
-    image: kasra-mcp-server:1.1.0
+    image: kasra-mcp-server:1.2.0
     restart: unless-stopped
     init: true
     read_only: true

@@ -148,6 +148,14 @@ def current_account() -> Account:
 
 class AccountMiddleware(Middleware):
     async def on_call_tool(self, context, call_next):
+        tool_name = context.message.name
+        if (
+            os.getenv("KASRA_MCP_MODE") != "http"
+            and os.getenv("KASRA_MCP_SCOPE") != "personal"
+            and not tool_name.startswith(("kasra_manager_", "kasra_personal_"))
+        ):
+            return await call_next(context)
+
         account = await accounts.get()
         if account.scope == "personal" and not context.message.name.startswith("kasra_personal_"):
             raise ToolError("حساب شخصی فقط به ابزارهای اطلاعات و درخواست‌های خود فرد دسترسی دارد.")

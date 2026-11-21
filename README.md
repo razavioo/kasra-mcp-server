@@ -1,8 +1,145 @@
-# Kasra MCP — Teamik extension
+# Kasra Lite Attendance & Personnel MCP Server
 
-This is a local source extension of [razavioo/kasra-mcp-server](https://github.com/razavioo/kasra-mcp-server), based on commit `c47f21af85b78a0e74f6e59e1c8a82a141c5264c` (upstream 1.0.7, MIT, Emad Razavi). The upstream Python client and personal tool definitions are retained. `README.upstream.md` is the original documentation. This extension has not been pushed to the author's repository or published on PyPI.
+[![PyPI Version](https://img.shields.io/pypi/v/kasra-mcp-server.svg)](https://pypi.org/project/kasra-mcp-server/)
+[![Python Version](https://img.shields.io/badge/python-3.10%2B-blue.svg)](https://www.python.org/downloads/)
+[![MCP](https://img.shields.io/badge/Model%20Context%20Protocol-FastMCP-brightgreen.svg)](https://modelcontextprotocol.io/)
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-## What changed
+A Model Context Protocol (MCP) server for the **Kasra Lite Attendance, Personnel, Cartable, and Leave Management System** ([app.kasralite.com](https://app.kasralite.com)).
+
+Connect your AI agents (Claude Desktop, OpenCode, Cursor, Windsurf, etc.) directly to Kasra Lite to view attendance, punches, leaves, cardex, cartable requests, work periods, and submit leave/mission requests autonomously.
+
+> 🚀 **Published on PyPI & 100% Pure HTTP / Async API — No Headless Browser Required!**
+> Runs via standard HTTP/2 APIs and AES-128-CBC encryption without downloading Chromium or running Playwright/Puppeteer. Automatically detects and routes Iranian enterprise traffic even when a foreign VPN (like Surfshark/v2ray) is active. Works on Linux, Docker, macOS, and Windows.
+
+---
+
+## ⚡ Quick Start (Zero-Install with `uvx`)
+
+You don't need to clone this repository or install Python dependencies manually. Just configure your agent:
+
+### Claude Desktop (`claude_desktop_config.json`)
+```json
+{
+  "mcpServers": {
+    "kasra": {
+      "command": "uvx",
+      "args": ["kasra-mcp-server@latest"],
+      "env": {
+        "KASRA_BASE_URL": "https://app.kasralite.com",
+        "KASRA_USERNAME": "your_username",
+        "KASRA_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+### OpenCode (`~/.config/opencode/opencode.jsonc` or `opencode.json`)
+```json
+{
+  "mcp": {
+    "kasra": {
+      "type": "local",
+      "command": [
+        "uvx",
+        "kasra-mcp-server@latest"
+      ],
+      "environment": {
+        "KASRA_BASE_URL": "https://app.kasralite.com",
+        "KASRA_USERNAME": "your_username",
+        "KASRA_PASSWORD": "your_password"
+      },
+      "enabled": true
+    }
+  }
+}
+```
+
+### Cursor (`.cursor/mcp.json`)
+```json
+{
+  "mcpServers": {
+    "kasra": {
+      "command": "uvx kasra-mcp-server@latest",
+      "env": {
+        "KASRA_BASE_URL": "https://app.kasralite.com",
+        "KASRA_USERNAME": "your_username",
+        "KASRA_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 📦 Traditional Installation (`pip`)
+
+```bash
+pip install kasra-mcp-server
+```
+
+Then configure your agent using `kasra-mcp-server`:
+```json
+{
+  "mcpServers": {
+    "kasra": {
+      "command": "kasra-mcp-server",
+      "env": {
+        "KASRA_BASE_URL": "https://app.kasralite.com",
+        "KASRA_USERNAME": "your_username",
+        "KASRA_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+---
+
+### Option C: From Local Source
+
+```bash
+git clone https://github.com/razavioo/kasra-mcp-server.git
+cd kasra-mcp-server
+pip install -r requirements.txt
+```
+
+```json
+{
+  "mcpServers": {
+    "kasra": {
+      "command": "python3",
+      "args": [
+        "/path/to/kasra-mcp-server/main.py"
+      ],
+      "env": {
+        "KASRA_BASE_URL": "https://app.kasralite.com",
+        "KASRA_USERNAME": "your_username",
+        "KASRA_PASSWORD": "your_password"
+      }
+    }
+  }
+}
+```
+
+---
+
+## 🧪 Testing
+
+Test all tools directly in python:
+```bash
+python3 test_tools.py
+```
+
+---
+
+## 📄 License
+
+This project is licensed under the [MIT License](LICENSE).
+
+## Manager and personal tools
 
 Six managerial tools and four isolated self-service tools extend the same FastMCP server:
 
@@ -20,7 +157,7 @@ Six managerial tools and four isolated self-service tools extend the same FastMC
 | `kasra_personal_get_period_report` | Own attendance and requests for a verified Kasra period |
 | `kasra_personal_submit_request` | One reviewed personal request; stable UUID, durable claim, business acknowledgement, no automatic resend |
 
-18 upstream tools remain discoverable. The original upstream submit/delete tools remain blocked. The new personal submission tool has its own review and duplicate-protection contract. Read tools retain their upstream schemas; the six new tools have explicit annotations, input constraints and structured results.
+The 18 existing tools keep their schemas and local stdio behavior. Private HTTP blocks the legacy submit and delete tools. The personal submission tool requires explicit confirmation and uses a durable submission ID.
 
 ## Local agent connection (stdio)
 
@@ -32,13 +169,13 @@ python3 -m venv .venv
 .venv/bin/pip install --no-deps .
 ```
 
-Provide `KASRA_USERNAME` and `KASRA_PASSWORD` through the agent's secure environment. Do not put credentials in prompts or a tracked config file. Add an MCP server using the environment's `teamik-kasra-mcp` command. A host that supports `mcpServers` can use:
+Provide `KASRA_USERNAME` and `KASRA_PASSWORD` through the agent's secure environment. Do not put credentials in prompts or a tracked config file. Add an MCP server using the environment's `kasra-mcp-server` command. A host that supports `mcpServers` can use:
 
 ```json
 {
   "mcpServers": {
-    "kasra-teamik": {
-      "command": "/absolute/path/to/.venv/bin/teamik-kasra-mcp"
+    "kasra": {
+      "command": "/absolute/path/to/.venv/bin/kasra-mcp-server"
     }
   }
 }
@@ -52,42 +189,17 @@ Examples:
 - Requests: `{"page":{"limit":25},"status":"pending"}`.
 - Daily: `{"personnel_code":"00123","jalali_date":"1405/07/01"}`.
 
-## Teamik server connection (private Streamable HTTP)
+## Private server connection (private Streamable HTTP)
 
-Teamik now resolves `KasraClient` to `KasraMcpClient`. The secure connection form verifies the signed-in profile and then persists the encrypted credentials. Reports are validated by the background sync; a report error keeps the verified connection in an attention state. The scheduled sync, secure connection form, daily details and manager decisions use MCP `initialize`, `notifications/initialized` and `tools/call`. The old PHP portal adapter remains as reference and parser test coverage; the application binding does not fall back to it.
+Run the private service with `KASRA_MCP_MODE=http`. Set a random
+`KASRA_MCP_TOKEN` of at least 32 characters and a base64-encoded 32-byte
+`KASRA_MCP_ENVELOPE_KEY`. Clients send the bearer token and a short-lived
+AES-256-GCM account envelope in `X-Kasra-Account`.
 
-Architecture:
-
-```text
-Teamik attendance UI / scheduled worker
-        -> Streamable HTTP MCP (private service)
-        -> this extended upstream Python client
-        -> Kasra portal over verified HTTPS
-```
-
-Set the following server configuration in the deployment environment (not Git):
-
-- `KASRA_MCP_URL=http://kasra-mcp:8000/mcp`
-- `KASRA_MCP_TOKEN`: random token of at least 32 characters, shared only between Teamik and this service.
-- `KASRA_MCP_ENVELOPE_KEY`: base64-encoded random 32-byte key, shared by both services.
-
-Use the additive `docker-compose.kasra.yml` override at the application root. Build this service and recreate the app using the existing deployment procedure and the override. The service has **no published host port**. It must remain on a private network; it is not a public OAuth MCP endpoint. External agents use stdio. If the service moves off the host, add authenticated TLS and adapt the client URL allowlist before sending credentials.
-
-The two secrets can be generated by an operator directly into the restricted deployment environment; use `secrets.token_urlsafe(48)` for the token and `base64.b64encode(secrets.token_bytes(32))` for the envelope key. Do not share the resulting values in chat.
-
-Actual Kasra credentials are entered only in Teamik's existing secure connection form, stored encrypted in its tenant database, and sent to MCP in a short-lived AES-256-GCM capsule in `X-Kasra-Account`. They are not MCP tool arguments. Account sessions are isolated and expire after inactivity. Only the connection owner can authorize a Teamik decision. A persistent SQLite ledger in the service volume prevents duplicate sends across reconnects and restarts. Back up and preserve this volume during releases.
-
-The private HTTP wrapper rejects requests without the service token and browser requests with an Origin. The capsule authenticates credential data and has a 75-second acceptance window; synchronize host clocks. Access logs are disabled. Do not enable request-header/body logging in reverse proxies or tracing tools.
-
-## Sync behavior and limits
-
-- Laravel's scheduler dispatches every 15 seconds when the previous operation permits. Provider latency, queue delay and throttling can increase delay. This is polling, not provider push.
-- A complete snapshot is written in one transaction; an incomplete/unknown response preserves the previous snapshot.
-- Codes retain leading zeroes. Staff are mapped explicitly to Teamik users; names are not auto-matched.
-- Approve/reject is never automatic. A timeout or unconfirmed result stays `needs_review`/`awaiting_confirmation` and is not blindly resent. A `sending` row left by a crash also blocks a resend; reconcile against Kasra.
-- The upstream dashboard exposes the signed-in person's cardex. **Balances for every employee are not implemented or validated.** Monthly leave used must not be displayed as remaining leave.
-- Current managerial snapshots cover the selected current report and cartables. Full historical backfill and new-request creation from Teamik remain separate work.
-- Portal integration is based on observed UI endpoints, not an official Kasra API contract. Live verification with the user's account is still required; fixture tests do not establish portal compatibility.
+The Compose service uses the existing Docker network named by
+`KASRA_MCP_NETWORK` and keeps the decision ledger in a named volume.
+Start it with `docker compose -f compose.server.yml up -d --build`.
+The service publishes no host port.
 
 ## Verification
 
@@ -96,24 +208,4 @@ The private HTTP wrapper rejects requests without the service token and browser 
 .venv/bin/python -m pytest -q
 ```
 
-Tests use HTTP mocks and the actual MCP protocol (in-process and private HTTP). They never access real employee data or submit a real request. PHP tests in `tests/Unit/KasraMcpClientTest.php` verify the Teamik client, encrypted credential contract, snapshots and ambiguous decisions. See the app integration documentation for release status and prerequisites.
-
-`docs/evaluation.xml` contains ten independent, read-only, multi-tool questions against the **fixed fictitious dataset** served by `tests/evaluation_fixture.py`. Their expected answers are verified through MCP calls in `tests/test_evaluation.py`. An LLM evaluation run has not been performed; no external model API key or real employee data is used by the test suite.
-
-## Personal attendance workspace
-
-Teamik stores each user's Kasra connection separately in `kasra_personal_connections`. Credentials, profile, report snapshot and request payloads/results are encrypted in the tenant database. A user must verify and confirm their own Kasra identity before saving. Existing local personnel mappings and national identifiers are checked; another local user's account cannot be reused. Employees can open only self service at `/attendance?tab=personal`; organizational import, export, mapping and managerial components keep their permissions.
-
-Personal capsules use `scope=personal`, `expected_code` and a per-call `can_submit` flag. They cannot invoke manager or upstream tools. Read and write grants share the same client/lock/backoff but never inherit each other's privileges. The source enforces own identity before report data is returned. Section errors are visible and retain the last successful section. Personal refresh is queued once a minute, not push or guaranteed instantaneous.
-
-A reviewed request receives a stable UUID. Both Laravel and the private MCP service persist an attempt before the external write. Ambiguous responses remain `needs_review` and cannot be retried automatically. Provider receipt is separate from managerial approval. Disconnect removes saved credentials and cached reports while preserving submission audit history.
-
-Managerial pending documents are mirrored into the connection owner's main Teamik cartable. Generic cartable completion/deletion/leave actions reject these entries; review links open the corresponding Kasra record and use the existing fresh fingerprint decision flow. Provider status or account replacement reconciles the local mirror.
-
-Cross-organization personnel references store the pair `(linked_tenant_id, linked_user_id)` and a display label, never a foreign user ID in the local `user_id` FK. This reference grants no login, role, membership or report access. Explicit deployment reconciliation is limited to the two authorized existing accounts in kodambroker.
-
-## Laravel integration kit
-
-The [Laravel overlay](integrations/laravel) contains the client, services, jobs, views and tenant migrations. See the [Persian integration guide](integrations/README.fa.md) for the host app wiring and dependencies. Use this repository as the sidecar build context, or copy it to the Laravel app's `services/kasra-mcp` directory.
-
-For an existing private Docker network, set `KASRA_MCP_NETWORK` and the HTTP credentials, then use `docker compose -f compose.server.yml up -d --build`. The service keeps its decision ledger in a named volume and publishes no host port.
+Tests use HTTP mocks and exercise the MCP protocol through stdio and private HTTP.

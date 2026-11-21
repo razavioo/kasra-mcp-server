@@ -212,3 +212,20 @@ async def test_private_http_tool_receives_only_its_encrypted_account(monkeypatch
                 assert response.json()['result']['structuredContent']['code'] == username
             assert fake_accounts == [('00123', 'dummy-secret'), ('00999', 'dummy-secret')]
     await pool.close()
+
+
+async def test_legacy_stdio_calls_use_original_client(monkeypatch):
+    from kasra_client import KasraClient
+
+    monkeypatch.setenv("KASRA_MCP_MODE", "stdio")
+    monkeypatch.delenv("KASRA_MCP_SCOPE", raising=False)
+    legacy = AsyncMock()
+    legacy.get_user_profile.return_value = {"name": "Fixture"}
+    monkeypatch.setattr(KasraClient, "get_instance", lambda: legacy)
+    account_lookup = AsyncMock()
+    monkeypatch.setattr(runtime.accounts, "get", account_lookup)
+    async with Client(mcp) as client:
+        result = await client.call_tool("kasra_get_profile", {})
+    assert result.data == {"name": "Fixture"}
+    legacy.get_user_profile.assert_awaited_once()
+    account_lookup.assert_not_awaited()

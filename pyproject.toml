@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "kasra-mcp-server"
-version = "1.1.0"
+version = "1.2.0"
 description = "Kasra Lite attendance, personal requests and manager workflows over MCP"
 readme = "README.md"
 authors = [{ name = "Emad Razavi", email = "razavioo@gmail.com" }]
