@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Fictitious fixed fixture only: run tests/evaluation_fixture.py, never real Kasra. -->
+<evaluation>
+  <qa_pair><question>در مجموعه آزمایشی ثابت، کدام شخص هم درخواست معلق ساعتی دارد و هم مرخصی روزانه تأییدشده؟ فقط کد پرسنلی با صفرهای ابتدا را بنویس.</question><answer>00123</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، میان افرادی که درخواست معلق دارند، بیشترین کسری کارکرد مربوط به کیست؟ فقط نام را بنویس.</question><answer>آزمایشی ج</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، کارکرد فردی که مأموریت روزانه تأییدشده دارد چقدر است؟ فقط HH:MM.</question><answer>140:00</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، فرد دارای درخواست ردشده ساعتی در تاریخ 1405/07/01 چه ساعت آخرین خروج دارد؟ فقط HH:MM.</question><answer>15:30</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، جمع اضافه‌کار افرادی که درخواست تأییدشده دارند چقدر است؟ افراد تکراری یک بار شمرده شوند؛ فقط HH:MM.</question><answer>08:10</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، چند نفر از افراد گزارش ماهانه هیچ درخواست معلق ندارند؟ فقط عدد انگلیسی.</question><answer>1</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، میان افراد دارای درخواست معلق، جمع کارکرد ماهانه چقدر است؟ فقط HH:MM.</question><answer>230:50</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، مقدار مرخصی روزانه مصرف‌شده فرد دارای بیشترین کارکرد را عین واحد منبع بنویس؛ مانده مرخصی منظور نیست.</question><answer>1,00:00</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، کدام سند معلق متعلق به شخصی است که درخواست ردشده هم دارد؟ فقط شناسه سند.</question><answer>12</answer></qa_pair>
+  <qa_pair><question>در مجموعه آزمایشی، مجموع کسری افراد دارای درخواست ساعتی معلق یا ردشده چقدر است؟ افراد تکراری یک بار شمرده شوند؛ فقط HH:MM.</question><answer>12:00</answer></qa_pair>
+</evaluation>

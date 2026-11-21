@@ -1,5 +1,1 @@
-fastmcp>=2.0.0
-httpx>=0.25.0
-beautifulsoup4>=4.12.0
-pycryptodome>=3.18.0
-python-dotenv>=1.0.0
+-e .

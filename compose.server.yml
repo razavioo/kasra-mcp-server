@@ -1,0 +1,50 @@
+services:
+  kasra-mcp:
+    build: .
+    image: kasra-mcp-server:1.1.0
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop:
+    - ALL
+    security_opt:
+    - no-new-privileges:true
+    environment:
+      KASRA_MCP_MODE: http
+      KASRA_MCP_HOST: 0.0.0.0
+      KASRA_MCP_TOKEN: ${KASRA_MCP_TOKEN:?Set the private MCP service token}
+      KASRA_MCP_ENVELOPE_KEY: ${KASRA_MCP_ENVELOPE_KEY:?Set the credential envelope
+        key}
+      KASRA_DECISION_DB: /data/decisions.sqlite
+    volumes:
+    - kasra-mcp-state:/data
+    tmpfs:
+    - /tmp:size=32m,mode=1777
+    mem_limit: 320m
+    cpus: 0.5
+    pids_limit: 64
+    stop_grace_period: 120s
+    healthcheck:
+      test:
+      - CMD
+      - python
+      - -c
+      - import socket; socket.create_connection(('127.0.0.1',8000),2).close()
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    networks:
+      default: null
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+volumes:
+  kasra-mcp-state: null
+name: kasra-mcp-server
+networks:
+  default:
+    external: true
+    name: ${KASRA_MCP_NETWORK:?Set the existing private Docker network}

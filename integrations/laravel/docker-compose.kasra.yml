@@ -1,0 +1,48 @@
+# Add to the existing deployment compose files. No host port is published.
+services:
+  app:
+    environment:
+      KASRA_MCP_URL: http://kasra-mcp:8000/mcp
+      KASRA_MCP_TOKEN: ${KASRA_MCP_TOKEN:?Set the private MCP service token}
+      KASRA_MCP_ENVELOPE_KEY: ${KASRA_MCP_ENVELOPE_KEY:?Set the credential envelope key}
+    depends_on:
+      kasra-mcp:
+        condition: service_healthy
+  kasra-mcp:
+    build:
+      context: ./services/kasra-mcp
+    image: ${TEAMIC_KASRA_MCP_IMAGE:-teamic-kasra-mcp:1.1.0}
+    restart: unless-stopped
+    init: true
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: [no-new-privileges:true]
+    environment:
+      KASRA_MCP_MODE: http
+      KASRA_MCP_HOST: 0.0.0.0
+      KASRA_MCP_TOKEN: ${KASRA_MCP_TOKEN:?Set the private MCP service token}
+      KASRA_MCP_ENVELOPE_KEY: ${KASRA_MCP_ENVELOPE_KEY:?Set the credential envelope key}
+      KASRA_DECISION_DB: /data/decisions.sqlite
+    volumes:
+      - kasra-mcp-state:/data
+    tmpfs:
+      - /tmp:size=32m,mode=1777
+    mem_limit: 320m
+    cpus: 0.5
+    pids_limit: 64
+    stop_grace_period: 120s
+    healthcheck:
+      test: [CMD, python, -c, "import socket; socket.create_connection(('127.0.0.1',8000),2).close()"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+      start_period: 15s
+    networks:
+      default:
+    logging:
+      driver: json-file
+      options:
+        max-size: 5m
+        max-file: '2'
+volumes:
+  kasra-mcp-state:
